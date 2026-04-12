@@ -14,9 +14,9 @@ if emulator_dir not in sys.path:
 
 
 class MockST7789:
-    def __init__(self, width=240, height=240):
-        self.width = width
-        self.height = height
+    def __init__(self, width=240, height=240, _width=None, _height=None):
+        self.width = _width if _width is not None else width
+        self.height = _height if _height is not None else height
 
     def show_image(self, image, x=0, y=0):
         with open("display.bmp", "wb") as f:
