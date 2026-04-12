@@ -29,7 +29,7 @@ class Window:
 
         self.root.geometry(f"{self.width*2}x{self.height}+240+240")
         self.root.resizable(False, False)
-        self.root.configure(bg="orange")
+        self.root.configure(bg="#F7931A")
         self.root.attributes("-topmost", True)
 
         self.label = Label(self.root)
@@ -38,7 +38,7 @@ class Window:
         self.joystick = Frame(self.root)
         self.joystick.pack()
         self.joystick.place(x=20, y=85)
-        self.joystick.configure(bg="orange")
+        self.joystick.configure(bg="#F7931A")
 
         pixel = PhotoImage(width=1, height=1)
 
