@@ -19,6 +19,8 @@ class MockST7789:
         self.height = _height if _height is not None else height
 
     def show_image(self, image, x=0, y=0):
+        if image.mode != "RGB":
+            image = image.convert("RGB")
         with open("display.bmp", "wb") as f:
             f.write(image.tobytes())
 
