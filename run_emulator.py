@@ -84,6 +84,13 @@ def setup_mocks(seedsigner_path):
     spidev_mock.SpiDev = Mock()
     sys.modules["spidev"] = spidev_mock
 
+    # Intercept os.execv to prevent nested processes on restart
+    def mock_execv(*args, **kwargs):
+        # os._exit bypasses exception handlers and terminates the subprocess immediately
+        os._exit(42)
+    
+    patch("os.execv", side_effect=mock_execv).start()
+
     patches_to_apply = MOCK_PATCHES[:-1] + [
         ("seedsigner.hardware.camera.Camera", MockCamera)
     ]
@@ -98,8 +105,6 @@ def setup_mocks(seedsigner_path):
 
 def run_gui(seedsigner_path):
     signal.signal(signal.SIGINT, signal.SIG_DFL)
-    sys.argv = sys.argv[:1]
-
     setup_mocks(seedsigner_path)
 
     from patches.window import Window
@@ -110,7 +115,10 @@ def run_gui(seedsigner_path):
 
 def run_main(seedsigner_path):
     signal.signal(signal.SIGINT, signal.SIG_DFL)
-    sys.argv = sys.argv[:1]
+
+    # Safely overwrite sys.argv within this subprocess. 
+    # This prevents SeedSigner's parser from crashing on the emulator's "/path" argument.
+    sys.argv = ["main.py"]
 
     setup_mocks(seedsigner_path)
 
@@ -118,7 +126,6 @@ def run_main(seedsigner_path):
 
     # Give GUI a moment to start up and create socket
     time.sleep(0.5)
-
     main()
 
 
@@ -143,41 +150,54 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
 
+    print("Starting GUI simulator...")
+    # Daemonizing the GUI ensures the OS cleans it up automatically if the parent crashes
     gui_process = multiprocessing.Process(
-        target=run_gui, args=(seedsigner_path,), name="GUI"
+        target=run_gui, args=(seedsigner_path,), name="GUI", daemon=True
     )
-    main_process = multiprocessing.Process(
-        target=run_main, args=(seedsigner_path,), name="Main"
-    )
+    gui_process.start()
 
     try:
-        print("Starting GUI simulator...")
-        gui_process.start()
+        while True:
+            main_process = multiprocessing.Process(
+                target=run_main, args=(seedsigner_path,), name="Main"
+            )
+            print("Starting SeedSigner main application...")
+            main_process.start()
 
-        print("Starting SeedSigner main application...")
-        main_process.start()
+            while main_process.is_alive():
+                # If the user closes the Pygame window, exit the whole emulator
+                if not gui_process.is_alive():
+                    print("GUI closed. Shutting down...")
+                    main_process.terminate()
+                    break
+                try:
+                    main_process.join(timeout=0.1)
+                except KeyboardInterrupt:
+                    break
 
-        while gui_process.is_alive() and main_process.is_alive():
-            try:
-                gui_process.join(timeout=0.1)
-                main_process.join(timeout=0.1)
-            except KeyboardInterrupt:
-                break
+            # If the process exited with our special code 42, a restart was requested.
+            if main_process.exitcode == 42:
+                print("\n[Emulator] Reboot requested. Restarting application...\n")
+                continue  # Loop again and spawn a fresh main_process
+            else:
+                break     # Normal exit or user quit
 
     except KeyboardInterrupt:
         pass
+    finally:
+        # Robust cleanup
+        if 'main_process' in locals() and main_process.is_alive():
+            main_process.terminate()
+            main_process.join(timeout=2)
+            if main_process.is_alive():
+                main_process.kill()
 
-    if main_process.is_alive():
-        main_process.terminate()
-        main_process.join(timeout=2)
-        if main_process.is_alive():
-            main_process.kill()
-
-    if gui_process.is_alive():
-        gui_process.terminate()
-        gui_process.join(timeout=2)
         if gui_process.is_alive():
-            gui_process.kill()
+            gui_process.terminate()
+            gui_process.join(timeout=2)
+            if gui_process.is_alive():
+                gui_process.kill()
 
 
 if __name__ == "__main__":
